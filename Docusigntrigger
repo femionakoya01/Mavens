@@ -1,0 +1,249 @@
+global class ApplicationTriggerBatch implements Database.Batchable<Application__c>, Database.AllowsCallouts, Database.stateful, Schedulable {
+    
+    public List<Application__c> totApplications;
+    
+    global ApplicationTriggerBatch(List<Application__c> apps) {
+        this.totApplications = apps;
+    }
+    
+    //For scheduling
+    global ApplicationTriggerBatch() {
+    }
+    
+    global Iterable<Application__c> start(Database.BatchableContext bc) {
+        return this.totApplications;
+    }
+    global void execute(Database.BatchableContext bc,  List<Application__c> applications) {        
+        for(Application__c app : applications) {
+            SendNow(app);
+        }
+    }
+    
+    global void SendNow(Application__c application) {
+        /********* Docusing for Salesforce Essenstials - STARTS*
+        Id mySourceId = application.Id; // The ID of the initiating Salesforce object.
+        dfsle.Envelope myEnvelope = dfsle.EnvelopeService.getEmptyEnvelope(
+        new dfsle.Entity(mySourceId));
+        
+        //use the Recipient.fromSource method to create the Recipient
+        dfsle.Recipient myRecipient = dfsle.Recipient.fromSource(
+            application.Name, // Recipient name
+            application.Email_PersonalInfo__c, // Recipient email
+            null, //Optional phone number
+            'Applicant', //Role Name. Specify the exact role name from template
+            new dfsle.Entity(application.Id)
+        ); //source object for the Recipient
+            
+        //add Recipient to the Envelope
+        myEnvelope = myEnvelope.withRecipients(new List<dfsle.Recipient> { myRecipient });
+        
+        //myTemplateId contains the DocuSign Id of the DocuSign Template
+        dfsle.UUID myTemplateId = dfsle.UUID.parse('82a0c4a6-4ca6-423b-9e51-e56a5f878277');
+        
+        //create a new document for the Envelope
+        dfsle.Document myDocument = dfsle.Document.fromTemplate(
+            myTemplateId, // templateId in dfsle.UUID format
+            'myTemplate'); // name of the template
+        
+        //add document to the Envelope
+        myEnvelope = myEnvelope.withDocuments(new List<dfsle.Document> { myDocument });
+        
+        // Send the envelope.
+        myEnvelope = dfsle.EnvelopeService.sendEnvelope(
+            myEnvelope, // The envelope to send
+            true); // Send now?
+        ********* Docusing for Salesforce Essenstials - ENDS*/
+        DocuSign_Settings__c docuSignSettings = DocuSign_Settings__c.getInstance();
+        String envelopeId;
+        String accountId = docuSignSettings.Account_Id__c;
+        String userId = docuSignSettings.User_Id__c;
+        String password = docuSignSettings.Password__c;
+        String integratorsKey = docuSignSettings.Integrators_Key__c;
+        String webServiceUrl = docuSignSettings.WebService_Url__c;
+            
+        DocuSignAPI.APIServiceSoap dsApiSend = new DocuSignAPI.APIServiceSoap();
+        dsApiSend.endpoint_x = webServiceUrl;
+        dsApiSend.timeout_x = 120000;
+
+        //Set Authentication
+        String auth = '<DocuSignCredentials><Username>'+ userId 
+            +'</Username><Password>' + password 
+            + '</Password><IntegratorKey>' + integratorsKey 
+            + '</IntegratorKey></DocuSignCredentials>';
+        System.debug('Setting authentication to: ' + auth);
+            
+        dsApiSend.inputHttpHeaders_x = new Map<String, String>();
+        dsApiSend.inputHttpHeaders_x.put('X-DocuSign-Authentication', 
+            auth);
+ 
+        DocuSignAPI.Envelope envelope = new DocuSignAPI.Envelope();
+        envelope.Subject = 'Please Sign this Application: ' 
+            + application.Name;
+        envelope.EmailBlurb = 'This is my new eSignature service,'+ 
+            ' it allows me to get your signoff without having to fax, ' +
+            'scan, retype, refile and wait forever';
+        envelope.AccountId  = accountId; 
+
+        // Render the contract
+        System.debug('Rendering the contract');
+        //PageReference pageRef = new PageReference('https://advantaira--partial--dsfs.visualforce.com/apex/envelopeiframe?eId=a0B230000002XwQEAU&sId=a0Y230000011KHLEA2');
+        //PageReference pageRef = new PageReference('https://partial-advantairasupport.cs195.force.com/advantaira/IRA_Render?id=');
+        PageReference pageRef = new PageReference('/apex/IRA_Render');
+        pageRef.getParameters().put('id',application.Id);
+        Blob pdfBlob = Test.isRunningTest() ? Blob.valueOf('abc') : pageRef.getContent();    
+        system.debug(pdfBlob);
+        
+        // Document
+        DocuSignAPI.Document document = new DocuSignAPI.Document();
+        document.ID = 1;
+        document.pdfBytes = EncodingUtil.base64Encode(pdfBlob);
+        document.Name = 'IRA Application';
+        document.FileExtension = 'pdf';
+        envelope.Documents = new DocuSignAPI.ArrayOfDocument();
+        envelope.Documents.Document = new DocuSignAPI.Document[1];
+        envelope.Documents.Document[0] = document;
+        
+        // Recipient
+        System.debug('getting the Application');
+        //Application__c application = [SELECT Email_PersonalInfo__c, First_Name_PersonalInfo__c, Last_Name_PersonalInfo__c 
+            //from Application__c where id = :applicationId];
+        
+        DocuSignAPI.Recipient recipient = new DocuSignAPI.Recipient();
+        recipient.ID = 1;
+        recipient.Type_x = 'Signer';
+        recipient.RoutingOrder = 1;
+        recipient.Email = application.Email_PersonalInfo__c;
+        recipient.UserName = application.First_Name_PersonalInfo__c + ' ' + application.Last_Name_PersonalInfo__c;
+        
+        /*DocuSignAPI.Recipient recipient2 = new DocuSignAPI.Recipient();
+        recipient2.ID = 2;
+        recipient2.Type_x = 'Signer';
+        recipient2.RoutingOrder = 2;
+        recipient2.Email = 'femi19866@gmail.com';
+        recipient2.UserName = application.First_Name_PersonalInfo__c + ' ' + application.Last_Name_PersonalInfo__c;*/
+        
+        /*DocuSignAPI.Recipient recipient2 = new DocuSignAPI.Recipient();
+        recipient2.ID = 2;
+        recipient2.Type_x = 'Signer';
+        recipient2.RoutingOrder = 2;
+        
+        DocuSignAPI.Recipient recipient3 = new DocuSignAPI.Recipient();
+        recipient3.ID = 3;
+        recipient3.Type_x = 'Signer';
+        recipient3.RoutingOrder = 3;
+        
+        DocuSignAPI.Recipient recipient4 = new DocuSignAPI.Recipient();
+        recipient4.ID = 4;
+        recipient4.Type_x = 'Signer';
+        recipient4.RoutingOrder = 4;
+        
+        DocuSignAPI.Recipient recipient5 = new DocuSignAPI.Recipient();
+        recipient5.ID = 5;
+        recipient5.Type_x = 'Signer';
+        recipient5.RoutingOrder = 5;
+        recipient5.Email = application.Email_PersonalInfo__c;
+        recipient5.UserName = application.First_Name_PersonalInfo__c + ' ' + application.Last_Name_PersonalInfo__c;*/
+            
+        // This setting seems required or you see the error:
+        // "The string '' is not a valid Boolean value. 
+        // at System.Xml.XmlConvert.ToBoolean(String s)" 
+        //recipient1.RequireIDLookup = recipient2.RequireIDLookup = recipient3.RequireIDLookup = recipient4.RequireIDLookup = recipient5.RequireIDLookup = false;      
+        recipient.RequireIDLookup = false;
+        envelope.Recipients = new DocuSignAPI.ArrayOfRecipient();
+        envelope.Recipients.Recipient = new DocuSignAPI.Recipient[1];
+        envelope.Recipients.Recipient[0] = recipient;
+        /*envelope.Recipients.Recipient[1] = recipient2;
+        envelope.Recipients.Recipient[2] = recipient3;
+        envelope.Recipients.Recipient[3] = recipient4;
+        envelope.Recipients.Recipient[4] = recipient5;*/
+        
+        DocuSignAPI.Tab tab1 = new DocuSignAPI.Tab();
+        tab1.Type_x = 'SignHere';
+        tab1.RecipientID = 1;
+        tab1.DocumentID = 1;
+        tab1.AnchorTabItem = new DocuSignAPI.AnchorTab();
+        //tab1.AnchorTabItem.AnchorTabString = 'Signature of Account Owner:';
+        //tab1.AnchorTabItem.AnchorTabString = 'By:';
+        tab1.AnchorTabItem.AnchorTabString = ':___';
+
+        
+        /*DocuSignAPI.Tab tab2 = new DocuSignAPI.Tab();
+        tab2.Type_x = 'SignHere';
+        tab2.RecipientID = 1;
+        tab2.DocumentID = 1;
+        tab2.AnchorTabItem = new DocuSignAPI.AnchorTab();
+        //tab2.AnchorTabItem.AnchorTabString = 'Spouse Signature By:';
+        tab2.AnchorTabItem.AnchorTabString = 'By:';
+        
+        DocuSignAPI.Tab tab3 = new DocuSignAPI.Tab();
+        tab3.Type_x = 'SignHere';
+        tab3.RecipientID = 1;
+        tab3.DocumentID = 1;
+        tab3.AnchorTabItem = new DocuSignAPI.AnchorTab();
+        //tab3.AnchorTabItem.AnchorTabString = 'Spouse Date Signed:'; 
+        tab3.AnchorTabItem.AnchorTabString = 'By:';
+        
+        DocuSignAPI.Tab tab4 = new DocuSignAPI.Tab();
+        tab4.Type_x = 'SignHere';
+        tab4.RecipientID = 1;
+        tab4.DocumentID = 1;
+        tab4.AnchorTabItem = new DocuSignAPI.AnchorTab();
+        //tab4.AnchorTabItem.AnchorTabString = 'Account Owner Signature By:';  
+        tab4.AnchorTabItem.AnchorTabString = 'By:';
+        
+        DocuSignAPI.Tab tab5 = new DocuSignAPI.Tab();
+        tab5.Type_x = 'SignHere';
+        tab5.RecipientID = 1;
+        tab5.DocumentID = 1;
+        tab5.AnchorTabItem = new DocuSignAPI.AnchorTab();
+        //tab5.AnchorTabItem.AnchorTabString = '';  
+        tab5.AnchorTabItem.AnchorTabString = 'By:';*/        
+        
+        //For Date : tab3.Type_x = 'DateSigned';
+        
+        envelope.Tabs = new DocuSignAPI.ArrayOfTab();
+        envelope.Tabs.Tab = new DocuSignAPI.Tab[6];
+        envelope.Tabs.Tab[0] = tab1;        
+        /*envelope.Tabs.Tab[1] = tab2;  
+        envelope.Tabs.Tab[2] = tab3;
+        envelope.Tabs.Tab[3] = tab4;
+        envelope.Tabs.Tab[4] = tab5;  */ 
+        
+        System.debug('Calling the API');
+        try {
+            if(!Test.isRunningTest()) {
+                DocuSignAPI.EnvelopeStatus es 
+                    = dsApiSend.CreateAndSendEnvelope(envelope);
+                envelopeId = es.EnvelopeID;
+                system.debug('***envelopeId: '+envelopeId);
+                
+                //Stop sending email after sending one time
+                application.Send_Email__c = false;
+                update application;
+                
+            }
+        } catch ( CalloutException e) {
+            System.debug('Exception - ' + e );
+            envelopeId = 'Exception - ' + e;
+        }
+      
+    }
+    
+    global void finish(Database.BatchableContext bc) {
+        Datetime sysTime = System.now();
+        sysTime = sysTime.addminutes(1);
+        String chron_exp = '' + sysTime.second() + ' ' + sysTime.minute() + ' ' +
+        sysTime.hour() + ' ' + sysTime.day() + ' ' + sysTime.month() + ' ? ' + sysTime.year();           
+        System.schedule('ApplicationTriggerBatch'+sysTime.getTime(),chron_exp, new ApplicationTriggerBatch());
+    }
+    
+    global void execute(System.SchedulableContext sc) {
+        Database.executeBatch(
+        new ApplicationTriggerBatch(
+            [select Id, Name, Email_PersonalInfo__c, First_Name_PersonalInfo__c, Last_Name_PersonalInfo__c from Application__c 
+            where Send_Email__c = true]
+        ),
+        1
+        );
+    }
+}
